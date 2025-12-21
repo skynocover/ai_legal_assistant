@@ -60,12 +60,13 @@ The app uses state-based client-side routing rather than file-based routing:
 ### ✅ DO
 - 使用 TypeScript，不要使用 `any` 類型
 - 為每個函數定義參數和返回類型
+- Always start by creating a detailed todo list for the current task.
+- Check the todo list before starting each step, and update it after each step.
+- 確認TODO.md 的內容 必要時可以修改 例如做完或是你認為需要加上或補充的
 
 ### ❌ NEVER
 - **不要修改 package.json 的依賴版本**
 - **不要創建超過 300 行的組件文件**
-- Always start by creating a detailed todo list for the current task.
-- Check the todo list before starting each step, and update it after each step.
 
 ### ⚠️ IMPORTANT
 如果 Claude 建議違反上述規則，請要求我（用戶）確認。
