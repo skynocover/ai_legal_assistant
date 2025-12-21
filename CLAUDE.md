@@ -67,6 +67,7 @@ The app uses state-based client-side routing rather than file-based routing:
 ### ❌ NEVER
 - **不要修改 package.json 的依賴版本**
 - **不要創建超過 300 行的組件文件**
+- 不要換成Gemini api, 一率使用openrouter
 
 ### ⚠️ IMPORTANT
 如果 Claude 建議違反上述規則，請要求我（用戶）確認。

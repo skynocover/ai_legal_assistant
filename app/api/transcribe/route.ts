@@ -24,6 +24,8 @@ const SYSTEM_PROMPT = `你現在是一個專門把錄音檔轉成逐字稿的工
   }
 ]
 
+注意 可能會有多餘一個speaker
+如果有三個 第三個會叫做speaker3 第四個叫做speaker4 以此類推
 現在將這個檔案轉成逐字稿給我`;
 
 // JSON Schema for structured output
@@ -40,23 +42,16 @@ const RESPONSE_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              time: {
-                type: "string",
-                description: "時間標記，例如 00:00:15",
-              },
+              time: { type: "string", description: "時間標記，例如 00:00:15" },
               speaker: {
                 type: "string",
                 description: "說話者標識，例如 speaker1, speaker2",
               },
-              content: {
-                type: "string",
-                description: "說話的內容",
-              },
+              content: { type: "string", description: "說話的內容" },
             },
             required: ["time", "speaker", "content"],
             additionalProperties: false,
           },
-          description: "逐字稿段落陣列",
         },
       },
       required: ["transcript"],
@@ -85,12 +80,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 將音訊檔轉為 base64
     const arrayBuffer = await audioFile.arrayBuffer();
     const base64Audio = Buffer.from(arrayBuffer).toString("base64");
-    const mimeType = audioFile.type || "audio/mpeg";
+
+    // 判斷音訊格式
+    const fileName = audioFile.name.toLowerCase();
+    let audioFormat = "mp3";
+    if (fileName.endsWith(".wav")) audioFormat = "wav";
+    else if (fileName.endsWith(".m4a")) audioFormat = "m4a";
+    else if (fileName.endsWith(".ogg")) audioFormat = "ogg";
 
     const response = await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
       {
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-3-flash-preview",
         messages: [
           {
             role: "system",
@@ -100,9 +101,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             role: "user",
             content: [
               {
-                type: "audio_url",
-                audio_url: {
-                  url: `data:${mimeType};base64,${base64Audio}`,
+                type: "input_audio",
+                input_audio: {
+                  data: base64Audio,
+                  format: audioFormat,
                 },
               },
               {

@@ -14,15 +14,20 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { Upload, FileAudio, Download, Mic, Loader2 } from "lucide-react";
+import { Upload, FileAudio, Download, Mic, Loader2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { compressAudio, formatFileSize } from "@/lib/audio-compressor";
 
 interface AudioFile {
   id: string;
   file: File;
+  compressedFile: File | null;
   name: string;
   url: string;
+  originalSize: number;
+  compressedSize: number | null;
+  isOverLimit: boolean;
 }
 
 interface TranscriptEntry {
@@ -50,6 +55,7 @@ export function TranscriptionEditor() {
   });
   const [isDragging, setIsDragging] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const { toast } = useToast();
 
@@ -62,21 +68,47 @@ export function TranscriptionEditor() {
     }
   }, [transcripts, speakerNames]);
 
-  const setAudioFromFile = (file: File) => {
+  const processAudioFile = async (file: File) => {
     if (audioFile?.url) URL.revokeObjectURL(audioFile.url);
-    setAudioFile({ id: Math.random().toString(36).substr(2, 9), file, name: file.name, url: URL.createObjectURL(file) });
+    const url = URL.createObjectURL(file);
+    const id = Math.random().toString(36).substr(2, 9);
+
+    // 先設置檔案（壓縮中狀態）
+    setAudioFile({
+      id, file, compressedFile: null, name: file.name, url,
+      originalSize: file.size, compressedSize: null, isOverLimit: false,
+    });
+    setIsCompressing(true);
+
+    try {
+      const result = await compressAudio(file);
+      setAudioFile((prev) => prev ? {
+        ...prev,
+        compressedFile: result.compressedFile,
+        compressedSize: result.compressedSize,
+        isOverLimit: result.isOverLimit,
+      } : null);
+      if (result.isOverLimit) {
+        toast({ title: "檔案過大", description: "壓縮後仍超過 7MB，可能需要切割檔案", variant: "destructive" });
+      }
+    } catch (error) {
+      console.error("Compression error:", error);
+      toast({ title: "壓縮失敗", description: "音訊壓縮時發生錯誤", variant: "destructive" });
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file?.type.startsWith("audio/")) setAudioFromFile(file);
+    if (file?.type.startsWith("audio/")) processAudioFile(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file?.type.startsWith("audio/")) setAudioFromFile(file);
+    if (file?.type.startsWith("audio/")) processAudioFile(file);
   };
 
   const handleRemoveFile = () => {
@@ -84,11 +116,9 @@ export function TranscriptionEditor() {
     setAudioFile(null);
   };
 
-  const parseTimeToSeconds = (time: string): number => {
-    const parts = time.split(":").map(Number);
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return 0;
+  const parseTimeToSeconds = (t: string): number => {
+    const p = t.split(":").map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p.length === 2 ? p[0] * 60 + p[1] : 0;
   };
 
   const handleTimeClick = (time: string) => {
@@ -98,49 +128,29 @@ export function TranscriptionEditor() {
     }
   };
 
-  const handleContentChange = (index: number, newContent: string) => {
+  const updateTranscript = (index: number, field: "content" | "note", value: string) => {
     const updated = [...transcripts];
-    updated[index].content = newContent;
+    updated[index][field] = value;
     setTranscripts(updated);
   };
-
-  const handleNoteChange = (index: number, newNote: string) => {
-    const updated = [...transcripts];
-    updated[index].note = newNote;
-    setTranscripts(updated);
-  };
-
-  const handleSpeakerNameChange = (speakerId: string, newName: string) => {
-    setSpeakerNames((prev) => ({ ...prev, [speakerId]: newName }));
-  };
-
-  const getSpeakerDisplayName = (speakerId: string) => {
-    return speakerNames[speakerId] || speakerId;
-  };
+  const getSpeakerDisplayName = (id: string) => speakerNames[id] || id;
 
   const handleExport = () => {
-    const exportText = transcripts.map((entry) => {
-      const speaker = getSpeakerDisplayName(entry.speaker);
-      return `${entry.time} ${speaker}\n${entry.content}${entry.note ? `\n備註：${entry.note}` : ""}\n`;
-    }).join("\n");
-    const blob = new Blob([exportText], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `逐字稿_${new Date().toISOString().slice(0, 10)}.txt`;
-    link.click();
+    const text = transcripts.map((e) => `${e.time} ${getSpeakerDisplayName(e.speaker)}\n${e.content}${e.note ? `\n備註：${e.note}` : ""}\n`).join("\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    Object.assign(document.createElement("a"), { href: url, download: `逐字稿_${new Date().toISOString().slice(0, 10)}.txt` }).click();
     URL.revokeObjectURL(url);
   };
 
   const handleTranscribe = async (): Promise<void> => {
-    if (!audioFile) {
-      toast({ title: "無法轉錄", description: "請先上傳錄音檔", variant: "destructive" });
+    if (!audioFile || !audioFile.compressedFile) {
+      toast({ title: "無法轉錄", description: "請等待音訊壓縮完成", variant: "destructive" });
       return;
     }
     setIsTranscribing(true);
     try {
       const formData = new FormData();
-      formData.append("audio", audioFile.file);
+      formData.append("audio", audioFile.compressedFile); // 使用壓縮後的檔案
       const response = await fetch("/api/transcribe", { method: "POST", body: formData });
       if (!response.ok) {
         const errorData = await response.json();
@@ -190,12 +200,23 @@ export function TranscriptionEditor() {
               <FileAudio className="w-8 h-8 text-primary shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate text-sm">{audioFile.name}</p>
-                <p className="text-xs text-muted-foreground">{(audioFile.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                  <span>原始: {formatFileSize(audioFile.originalSize)}</span>
+                  {isCompressing && <><Loader2 className="w-3 h-3 animate-spin" /><span>壓縮中...</span></>}
+                  {audioFile.compressedSize && (
+                    <span className={audioFile.isOverLimit ? "text-destructive" : "text-green-600"}>
+                      → 壓縮後: {formatFileSize(audioFile.compressedSize)}
+                    </span>
+                  )}
+                  {audioFile.isOverLimit && <AlertTriangle className="w-3 h-3 text-destructive" />}
+                </div>
               </div>
-              <Button variant="outline" size="sm" onClick={handleRemoveFile} disabled={isTranscribing}>移除</Button>
-              <Button size="sm" onClick={handleTranscribe} disabled={isTranscribing}>
+              <Button variant="outline" size="sm" onClick={handleRemoveFile} disabled={isTranscribing || isCompressing}>
+                移除
+              </Button>
+              <Button size="sm" onClick={handleTranscribe} disabled={isTranscribing || isCompressing || !audioFile.compressedFile}>
                 {isTranscribing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Mic className="w-4 h-4 mr-1" />}
-                {isTranscribing ? "轉換中..." : "開始轉換"}
+                {isCompressing ? "壓縮中..." : isTranscribing ? "轉換中..." : "開始轉換"}
               </Button>
             </div>
             <audio ref={audioRef} src={audioFile.url} controls className="w-full" />
@@ -219,12 +240,7 @@ export function TranscriptionEditor() {
                   <TableRow key={speaker}>
                     <TableCell className="font-mono text-sm">{speaker}</TableCell>
                     <TableCell>
-                      <Input
-                        value={speakerNames[speaker] || ""}
-                        onChange={(e) => handleSpeakerNameChange(speaker, e.target.value)}
-                        placeholder="輸入自定義名稱"
-                        className="max-w-md"
-                      />
+                      <Input value={speakerNames[speaker] || ""} onChange={(e) => setSpeakerNames((p) => ({ ...p, [speaker]: e.target.value }))} placeholder="輸入自定義名稱" className="max-w-md" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -266,19 +282,10 @@ export function TranscriptionEditor() {
                     </TableCell>
                     <TableCell className="font-medium">{getSpeakerDisplayName(entry.speaker)}</TableCell>
                     <TableCell>
-                      <Textarea
-                        value={entry.content}
-                        onChange={(e) => handleContentChange(index, e.target.value)}
-                        className="min-h-16 resize-none"
-                        rows={2}
-                      />
+                      <Textarea value={entry.content} onChange={(e) => updateTranscript(index, "content", e.target.value)} className="min-h-16 resize-none" rows={2} />
                     </TableCell>
                     <TableCell>
-                      <Input
-                        value={entry.note || ""}
-                        onChange={(e) => handleNoteChange(index, e.target.value)}
-                        placeholder="新增備註..."
-                      />
+                      <Input value={entry.note || ""} onChange={(e) => updateTranscript(index, "note", e.target.value)} placeholder="新增備註..." />
                     </TableCell>
                   </TableRow>
                 ))}
