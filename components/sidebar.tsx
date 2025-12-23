@@ -2,10 +2,10 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, MessageSquare, Mic, FileText, FolderOpen } from "lucide-react"
+import { ChevronLeft, ChevronRight, MessageSquare, Mic, FileText, FolderOpen, Files } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-type MenuItemKey = "line-chat" | "transcription" | "rename" | "case-management"
+type MenuItemKey = "pdf-merger" | "line-chat" | "transcription" | "rename" | "case-management"
 
 interface SidebarProps {
   selectedItem: MenuItemKey
@@ -16,6 +16,11 @@ export function Sidebar({ selectedItem, onSelectItem }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   const menuItems = [
+    {
+      key: "pdf-merger" as MenuItemKey,
+      label: "PDF文件整合",
+      icon: Files,
+    },
     {
       key: "line-chat" as MenuItemKey,
       label: "Line聊天記錄排序",
